@@ -220,7 +220,6 @@ fn type_section(s: &[u8]) -> IResult<&[u8], TypeSection> {
     let (s, (vec_length, _)) = leb_128_u32(s)?;
     let (s, function_types) = count(function_type, vec_length as usize)(s)?;
     let type_section = TypeSection { function_types };
-    println!("TS: {:?}", type_section);
     Ok((s, type_section))
 }
 
@@ -390,7 +389,6 @@ fn desc(desc_kind_byte: u8, idx: u32) -> ExportDesc {
 
 fn name(s: &[u8]) -> IResult<&[u8], (&str, u32)> {
     let (s, (vec_length, _)) = leb_128_u32(s)?;
-    println!("NAME LENGTH {}", vec_length);
     let (s, name) = take(vec_length)(s)?;
     let name = std::str::from_utf8(name).unwrap();
 
