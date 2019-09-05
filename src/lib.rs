@@ -18,7 +18,9 @@ const IMPORT_SECTION_ID: char = 2 as char;
 const FUNCTION_SECTION_ID: char = 3 as char;
 const TABLE_SECTION_ID: char = 4 as char;
 const MEMORY_SECTION_ID: char = 5 as char;
+const GLOBAL_SECTION_ID: char = 6 as char;
 const EXPORT_SECTION_ID: char = 7 as char;
+const START_SECTION_ID: char = 8 as char;
 const CODE_SECTION_ID: char = 10 as char;
 
 const FUNCTION_TYPE: char = 0x60 as char;
@@ -40,16 +42,16 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, customs5) = many0(complete(custom_section))(s)?;
     let (s, memories) = opt(memory_section)(s)?;
     let (s, customs6) = many0(complete(custom_section))(s)?;
-    // TODO: global section
-    // TODO: custom section
-    let (s, exports) = opt(export_section)(s)?;
+    let (s, globals) = opt(global_section)(s)?;
     let (s, customs7) = many0(complete(custom_section))(s)?;
-    // TODO: start section
-    // TODO: custom section
+    let (s, exports) = opt(export_section)(s)?;
+    let (s, customs8) = many0(complete(custom_section))(s)?;
+    let (s, start) = opt(start_section)(s)?;
+    let (s, customs9) = many0(complete(custom_section))(s)?;
     // TODO: elem section
     // TODO: custom section
     let (s, code) = opt(code_section)(s)?;
-    let (s, customs8) = many0(complete(custom_section))(s)?;
+    let (s, customs10) = many0(complete(custom_section))(s)?;
     // TODO: data section
     // TODO: custom section
 
@@ -60,6 +62,8 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     customs.extend(customs6);
     customs.extend(customs7);
     customs.extend(customs8);
+    customs.extend(customs9);
+    customs.extend(customs10);
 
     Ok((
         s,
@@ -70,7 +74,9 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
             functions,
             tables,
             memories,
+            globals,
             exports,
+            start,
             code,
             customs,
         },
@@ -85,7 +91,9 @@ pub struct WasmModule<'a> {
     functions: Option<FunctionSection>,
     tables: Option<TableSection>,
     memories: Option<MemorySection>,
+    globals: Option<GlobalSection>,
     exports: Option<ExportSection<'a>>,
+    start: Option<StartSection>,
     code: Option<CodeSection>,
     customs: Vec<CustomSection<'a>>,
 }
@@ -160,6 +168,28 @@ pub struct MemorySection {
 #[derive(Clone, Debug)]
 pub struct Memory {
     limits: Limits,
+}
+
+#[derive(Clone, Debug)]
+pub struct StartSection {
+    start: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct GlobalSection {
+    globals: Vec<Global>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Global {
+    global_type: GlobalType,
+    expression: Expression,
+}
+
+#[derive(Clone, Debug)]
+pub struct GlobalType {
+    value_type: ValType,
+    is_mutable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -385,6 +415,53 @@ fn memory_section(s: &[u8]) -> IResult<&[u8], MemorySection> {
     Ok((s, MemorySection { memories }))
 }
 
+fn global_section(s: &[u8]) -> IResult<&[u8], GlobalSection> {
+    let (s, _section_id) = char(GLOBAL_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128_u32(s)?;
+    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, globals) = count(global, vec_length as usize)(s)?;
+
+    Ok((s, GlobalSection { globals }))
+}
+
+fn global(s: &[u8]) -> IResult<&[u8], Global> {
+    let (s, global_type) = global_type(s)?;
+    let (s, expression) = expression(s)?;
+
+    Ok((
+        s,
+        Global {
+            global_type,
+            expression,
+        },
+    ))
+}
+
+fn global_type(s: &[u8]) -> IResult<&[u8], GlobalType> {
+    let (s, value_type) = map(le_u8, byte_to_type)(s)?;
+    let (s, is_mutable) = boolean_byte(s)?;
+
+    Ok((
+        s,
+        GlobalType {
+            value_type,
+            is_mutable,
+        },
+    ))
+}
+
+fn boolean_byte(s: &[u8]) -> IResult<&[u8], bool> {
+    let (s, byte) = le_u8(s)?;
+    Ok((
+        s,
+        match byte {
+            0x00 => false,
+            0x01 => true,
+            _ => panic!("Boolean byte must be either 0x00 for false of 0x01 for true"),
+        },
+    ))
+}
+
 fn export_section(s: &[u8]) -> IResult<&[u8], ExportSection> {
     let (s, _section_id) = char(EXPORT_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
@@ -400,6 +477,14 @@ fn export(s: &[u8]) -> IResult<&[u8], Export> {
     let (s, (idx, _)) = leb_128_u32(s)?;
     let desc = desc(desc_kind_byte, idx);
     Ok((s, Export { name, desc }))
+}
+
+fn start_section(s: &[u8]) -> IResult<&[u8], StartSection> {
+    let (s, _section_id) = char(START_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128_u32(s)?;
+    let (s, (idx, _)) = leb_128_u32(s)?;
+
+    Ok((s, StartSection { start: idx }))
 }
 
 fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
