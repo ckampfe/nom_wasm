@@ -3,7 +3,7 @@
 use nom::branch::alt;
 use nom::bytes::streaming::{tag, take};
 use nom::character::streaming::char;
-use nom::combinator::{complete, map};
+use nom::combinator::{complete, map, opt};
 use nom::multi::{count, many0};
 use nom::number::streaming::{le_u32, le_u8};
 use nom::sequence::pair;
@@ -12,29 +12,43 @@ use nom::*;
 type ParseResult<'a, T> =
     std::result::Result<(T, WasmModule<'a>), nom::Err<(T, nom::error::ErrorKind)>>;
 
+const CUSTOM_SECTION_ID: char = 0 as char;
+const TYPE_SECTION_ID: char = 1 as char;
+const IMPORT_SECTION_ID: char = 2 as char;
+const FUNCTION_SECTION_ID: char = 3 as char;
+const TABLE_SECTION_ID: char = 4 as char;
+const MEMORY_SECTION_ID: char = 5 as char;
+const EXPORT_SECTION_ID: char = 7 as char;
+const CODE_SECTION_ID: char = 10 as char;
+
+const FUNCTION_TYPE: char = 0x60 as char;
+const FUNC_REF_TYPE: char = 0x70 as char;
+
+const END_OPCODE: char = 0x0B as char;
+
 pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, _) = magic(bytes)?;
     let (s, version) = version(s)?;
     let (s, mut customs) = many0(complete(custom_section))(s)?;
-    let (s, types) = type_section(s)?;
+    let (s, types) = opt(type_section)(s)?;
     let (s, customs2) = many0(complete(custom_section))(s)?;
-    // import section
+    let (s, imports) = opt(import_section)(s)?;
     // custom section
-    let (s, functions) = function_section(s)?;
+    let (s, functions) = opt(function_section)(s)?;
     let (s, customs3) = many0(complete(custom_section))(s)?;
-    let (s, tables) = table_section(s)?;
+    let (s, tables) = opt(table_section)(s)?;
     let (s, customs4) = many0(complete(custom_section))(s)?;
-    let (s, memories) = memory_section(s)?;
+    let (s, memories) = opt(memory_section)(s)?;
     let (s, customs5) = many0(complete(custom_section))(s)?;
     // global section
     // custom section
-    let (s, exports) = export_section(s)?;
+    let (s, exports) = opt(export_section)(s)?;
     let (s, customs6) = many0(complete(custom_section))(s)?;
     // start section
     // custom section
     // elem section
     // custom section
-    let (s, code) = code_section(s)?;
+    let (s, code) = opt(code_section)(s)?;
     let (s, customs7) = many0(complete(custom_section))(s)?;
     // data section
     // custom section
@@ -51,6 +65,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
         WasmModule {
             version,
             types,
+            imports,
             functions,
             tables,
             memories,
@@ -64,18 +79,31 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
 #[derive(Clone, Debug)]
 pub struct WasmModule<'a> {
     version: u32,
-    types: TypeSection,
-    functions: FunctionSection,
-    tables: TableSection,
-    memories: MemorySection,
-    exports: ExportSection<'a>,
-    code: CodeSection,
+    types: Option<TypeSection>,
+    imports: Option<ImportSection<'a>>,
+    functions: Option<FunctionSection>,
+    tables: Option<TableSection>,
+    memories: Option<MemorySection>,
+    exports: Option<ExportSection<'a>>,
+    code: Option<CodeSection>,
     customs: Vec<CustomSection<'a>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TypeSection {
     function_types: Vec<FunctionType>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImportSection<'a> {
+    imports: Vec<Import<'a>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Import<'a> {
+    module: &'a str,
+    name: &'a str,
+    import_description: ImportDesc,
 }
 
 #[derive(Clone, Debug)]
@@ -144,12 +172,57 @@ pub struct Export<'a> {
     desc: ExportDesc,
 }
 
+trait Description {
+    fn function_index(idx: u32) -> Self;
+    fn table_index(idx: u32) -> Self;
+    fn memory_index(idx: u32) -> Self;
+    fn global_index(idx: u32) -> Self;
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportDesc {
     FuncIdx(u32),
     TableIdx(u32),
     MemIdx(u32),
     GlobalIdx(u32),
+}
+
+impl Description for ExportDesc {
+    fn function_index(idx: u32) -> Self {
+        Self::FuncIdx(idx)
+    }
+    fn table_index(idx: u32) -> Self {
+        Self::TableIdx(idx)
+    }
+    fn memory_index(idx: u32) -> Self {
+        Self::MemIdx(idx)
+    }
+    fn global_index(idx: u32) -> Self {
+        Self::GlobalIdx(idx)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ImportDesc {
+    FuncIdx(u32),
+    TableIdx(u32),
+    MemIdx(u32),
+    GlobalIdx(u32),
+}
+
+impl Description for ImportDesc {
+    fn function_index(idx: u32) -> Self {
+        Self::FuncIdx(idx)
+    }
+    fn table_index(idx: u32) -> Self {
+        Self::TableIdx(idx)
+    }
+    fn memory_index(idx: u32) -> Self {
+        Self::MemIdx(idx)
+    }
+    fn global_index(idx: u32) -> Self {
+        Self::GlobalIdx(idx)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -215,7 +288,7 @@ fn version(s: &[u8]) -> IResult<&[u8], u32> {
 }
 
 fn type_section(s: &[u8]) -> IResult<&[u8], TypeSection> {
-    let (s, _section_id) = char(1 as char)(s)?;
+    let (s, _section_id) = char(TYPE_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
     let (s, function_types) = count(function_type, vec_length as usize)(s)?;
@@ -224,7 +297,7 @@ fn type_section(s: &[u8]) -> IResult<&[u8], TypeSection> {
 }
 
 fn function_type(s: &[u8]) -> IResult<&[u8], FunctionType> {
-    let (s, _function_type_id) = char(0x60 as char)(s)?;
+    let (s, _function_type_id) = char(FUNCTION_TYPE)(s)?;
     let (s, (parameter_type_length, _)) = leb_128_u32(s)?;
     let (s, parameter_types) = count(map(le_u8, byte_to_type), parameter_type_length as usize)(s)?;
     let (s, (result_type_length, _)) = leb_128_u32(s)?;
@@ -238,8 +311,34 @@ fn function_type(s: &[u8]) -> IResult<&[u8], FunctionType> {
     ))
 }
 
+fn import_section(s: &[u8]) -> IResult<&[u8], ImportSection> {
+    let (s, _section_id) = char(IMPORT_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128_u32(s)?;
+    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, imports) = count(import, vec_length as usize)(s)?;
+
+    Ok((s, ImportSection { imports }))
+}
+
+fn import(s: &[u8]) -> IResult<&[u8], Import> {
+    let (s, (module, _)) = name(s)?;
+    let (s, (name, _)) = name(s)?;
+    let (s, desc_kind_byte) = le_u8(s)?;
+    let (s, (idx, _)) = leb_128_u32(s)?;
+    let import_description = desc(desc_kind_byte, idx);
+
+    Ok((
+        s,
+        Import {
+            module,
+            name,
+            import_description,
+        },
+    ))
+}
+
 fn function_section(s: &[u8]) -> IResult<&[u8], FunctionSection> {
-    let (s, _section_id) = char(3 as char)(s)?;
+    let (s, _section_id) = char(FUNCTION_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
     let mut type_indices = vec![];
@@ -260,17 +359,14 @@ fn function_section(s: &[u8]) -> IResult<&[u8], FunctionSection> {
 }
 
 fn table_section(s: &[u8]) -> IResult<&[u8], TableSection> {
-    let (s, _section_id) = char(4 as char)(s)?;
+    let (s, _section_id) = char(TABLE_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
 
     let (s, tables) = count(
-        map(pair(le_u8, limits), |(funcref, limits)| {
-            assert_eq!(funcref, 0x70);
-            Table {
-                r#type: FuncRef(),
-                limits,
-            }
+        map(pair(func_ref, limits), |(_funcref, limits)| Table {
+            r#type: FuncRef(),
+            limits,
         }),
         vec_length as usize,
     )(s)?;
@@ -279,7 +375,7 @@ fn table_section(s: &[u8]) -> IResult<&[u8], TableSection> {
 }
 
 fn memory_section(s: &[u8]) -> IResult<&[u8], MemorySection> {
-    let (s, _section_id) = char(5 as char)(s)?;
+    let (s, _section_id) = char(MEMORY_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
 
@@ -289,7 +385,7 @@ fn memory_section(s: &[u8]) -> IResult<&[u8], MemorySection> {
 }
 
 fn export_section(s: &[u8]) -> IResult<&[u8], ExportSection> {
-    let (s, _section_id) = char(7 as char)(s)?;
+    let (s, _section_id) = char(EXPORT_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
     let (s, exports) = count(export, vec_length as usize)(s)?;
@@ -306,7 +402,7 @@ fn export(s: &[u8]) -> IResult<&[u8], Export> {
 }
 
 fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
-    let (s, _section_id) = char(10 as char)(s)?;
+    let (s, _section_id) = char(CODE_SECTION_ID)(s)?;
     let (s, _section_length_bytes) = leb_128_u32(s)?;
     let (s, (vec_length, _)) = leb_128_u32(s)?;
 
@@ -348,7 +444,7 @@ fn local(s: &[u8]) -> IResult<&[u8], LocalDeclaration> {
 
 fn expression(s: &[u8]) -> IResult<&[u8], Expression> {
     let (s, instructions) = many0(instruction)(s)?;
-    let (s, _) = char(0x0B.into())(s)?;
+    let (s, _) = char(END_OPCODE)(s)?;
     Ok((s, Expression { instructions }))
 }
 
@@ -368,7 +464,7 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
 }
 
 fn custom_section(s: &[u8]) -> IResult<&[u8], CustomSection> {
-    let (s, _section_id) = char(0 as char)(s)?;
+    let (s, _section_id) = char(CUSTOM_SECTION_ID)(s)?;
     let (s, (section_length_bytes, consumed)) = leb_128_u32(s)?;
     let (s, (name, name_bytes_taken)) = name(s)?;
     let to_take = section_length_bytes - name_bytes_taken - consumed;
@@ -377,12 +473,12 @@ fn custom_section(s: &[u8]) -> IResult<&[u8], CustomSection> {
     Ok((s, CustomSection { name, bytes }))
 }
 
-fn desc(desc_kind_byte: u8, idx: u32) -> ExportDesc {
+fn desc<T: Description>(desc_kind_byte: u8, idx: u32) -> T {
     match desc_kind_byte {
-        0x00 => ExportDesc::FuncIdx(idx),
-        0x01 => ExportDesc::TableIdx(idx),
-        0x02 => ExportDesc::MemIdx(idx),
-        0x03 => ExportDesc::GlobalIdx(idx),
+        0x00 => T::function_index(idx),
+        0x01 => T::table_index(idx),
+        0x02 => T::memory_index(idx),
+        0x03 => T::global_index(idx),
         _ => panic!("Export desc byte must be between 0x00 and 0x03 inclusive."),
     }
 }
@@ -413,6 +509,11 @@ fn limits(s: &[u8]) -> IResult<&[u8], Limits> {
         }
         _ => panic!("Limits kind byte must be 0x00 or 0x01"),
     }
+}
+
+fn func_ref(s: &[u8]) -> IResult<&[u8], ()> {
+    let (s, _) = char(FUNC_REF_TYPE)(s)?;
+    Ok((s, ()))
 }
 
 /// https://en.wikipedia.org/wiki/LEB128 and
@@ -488,44 +589,46 @@ mod tests {
         assert_eq!(wasm.version, 1);
 
         // types section
-        assert_eq!(wasm.types.function_types[0].parameter_types.len(), 1);
-        assert_eq!(
-            wasm.types.function_types[0].parameter_types[0],
-            ValType::I32
-        );
-        assert_eq!(wasm.types.function_types[0].result_types.len(), 1);
-        assert_eq!(wasm.types.function_types[0].result_types[0], ValType::I32);
+        let types = wasm.types.unwrap();
+        assert_eq!(types.function_types[0].parameter_types.len(), 1);
+        assert_eq!(types.function_types[0].parameter_types[0], ValType::I32);
+        assert_eq!(types.function_types[0].result_types.len(), 1);
+        assert_eq!(types.function_types[0].result_types[0], ValType::I32);
 
         // function section
-        assert_eq!(wasm.functions.functions[0], 0);
+        assert_eq!(wasm.functions.unwrap().functions[0], 0);
 
         // table section
-        assert_eq!(wasm.tables.tables[0].limits.min, 1);
-        assert_eq!(wasm.tables.tables[0].limits.max, Max::Number(1));
+        let tables = wasm.tables.unwrap();
+        assert_eq!(tables.tables[0].limits.min, 1);
+        assert_eq!(tables.tables[0].limits.max, Max::Number(1));
 
         // memory section
-        assert_eq!(wasm.memories.memories[0].limits.min, 17);
-        assert_eq!(wasm.memories.memories[0].limits.max, Max::E);
+        let memories = wasm.memories.unwrap();
+        assert_eq!(memories.memories[0].limits.min, 17);
+        assert_eq!(memories.memories[0].limits.max, Max::E);
 
         // export section
-        assert_eq!(wasm.exports.exports[0].name, "memory");
-        assert_eq!(wasm.exports.exports[0].desc, ExportDesc::MemIdx(0));
-        assert_eq!(wasm.exports.exports[1].name, "add_one");
-        assert_eq!(wasm.exports.exports[1].desc, ExportDesc::FuncIdx(0));
+        let exports = wasm.exports.unwrap();
+        assert_eq!(exports.exports[0].name, "memory");
+        assert_eq!(exports.exports[0].desc, ExportDesc::MemIdx(0));
+        assert_eq!(exports.exports[1].name, "add_one");
+        assert_eq!(exports.exports[1].desc, ExportDesc::FuncIdx(0));
 
         // code section
-        assert_eq!(wasm.code.codes[0].size, 7);
-        assert!(wasm.code.codes[0].function.locals.is_empty());
+        let code = wasm.code.unwrap();
+        assert_eq!(code.codes[0].size, 7);
+        assert!(code.codes[0].function.locals.is_empty());
         assert_eq!(
-            wasm.code.codes[0].function.expression.instructions[0],
+            code.codes[0].function.expression.instructions[0],
             Instruction::LocalGet(0)
         );
         assert_eq!(
-            wasm.code.codes[0].function.expression.instructions[1],
+            code.codes[0].function.expression.instructions[1],
             Instruction::I32Const(1)
         );
         assert_eq!(
-            wasm.code.codes[0].function.expression.instructions[2],
+            code.codes[0].function.expression.instructions[2],
             Instruction::I32Add
         );
 
