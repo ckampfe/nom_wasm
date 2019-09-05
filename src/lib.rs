@@ -21,6 +21,7 @@ const MEMORY_SECTION_ID: char = 5 as char;
 const GLOBAL_SECTION_ID: char = 6 as char;
 const EXPORT_SECTION_ID: char = 7 as char;
 const START_SECTION_ID: char = 8 as char;
+const ELEMENT_SECTION_ID: char = 9 as char;
 const CODE_SECTION_ID: char = 10 as char;
 
 const FUNCTION_TYPE: char = 0x60 as char;
@@ -48,10 +49,10 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, customs8) = many0(complete(custom_section))(s)?;
     let (s, start) = opt(start_section)(s)?;
     let (s, customs9) = many0(complete(custom_section))(s)?;
-    // TODO: elem section
-    // TODO: custom section
-    let (s, code) = opt(code_section)(s)?;
+    let (s, elements) = opt(element_section)(s)?;
     let (s, customs10) = many0(complete(custom_section))(s)?;
+    let (s, code) = opt(code_section)(s)?;
+    let (s, customs11) = many0(complete(custom_section))(s)?;
     // TODO: data section
     // TODO: custom section
 
@@ -64,6 +65,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     customs.extend(customs8);
     customs.extend(customs9);
     customs.extend(customs10);
+    customs.extend(customs11);
 
     Ok((
         s,
@@ -77,6 +79,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
             globals,
             exports,
             start,
+            elements,
             code,
             customs,
         },
@@ -94,6 +97,7 @@ pub struct WasmModule<'a> {
     globals: Option<GlobalSection>,
     exports: Option<ExportSection<'a>>,
     start: Option<StartSection>,
+    elements: Option<ElementSection>,
     code: Option<CodeSection>,
     customs: Vec<CustomSection<'a>>,
 }
@@ -173,6 +177,18 @@ pub struct Memory {
 #[derive(Clone, Debug)]
 pub struct StartSection {
     start: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct ElementSection {
+    elements: Vec<Element>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Element {
+    table_index: u32,
+    offset: Expression,
+    init: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -485,6 +501,31 @@ fn start_section(s: &[u8]) -> IResult<&[u8], StartSection> {
     let (s, (idx, _)) = leb_128_u32(s)?;
 
     Ok((s, StartSection { start: idx }))
+}
+
+fn element_section(s: &[u8]) -> IResult<&[u8], ElementSection> {
+    let (s, _section_id) = char(ELEMENT_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128_u32(s)?;
+    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, elements) = count(element, vec_length as usize)(s)?;
+
+    Ok((s, ElementSection { elements }))
+}
+
+fn element(s: &[u8]) -> IResult<&[u8], Element> {
+    let (s, (table_index, _)) = leb_128_u32(s)?;
+    let (s, offset) = expression(s)?;
+    let (s, (init_vec_length, _)) = leb_128_u32(s)?;
+    let (s, init) = count(leb_128_u32, init_vec_length as usize)(s)?;
+
+    Ok((
+        s,
+        Element {
+            table_index,
+            offset,
+            init: init.into_iter().map(|t| t.0).collect(),
+        },
+    ))
 }
 
 fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
