@@ -23,49 +23,54 @@ const EXPORT_SECTION_ID: char = 7 as char;
 const START_SECTION_ID: char = 8 as char;
 const ELEMENT_SECTION_ID: char = 9 as char;
 const CODE_SECTION_ID: char = 10 as char;
+const DATA_SECTION_ID: char = 11 as char;
 
 const FUNCTION_TYPE: char = 0x60 as char;
 const FUNC_REF_TYPE: char = 0x70 as char;
 
 const END_OPCODE: char = 0x0B as char;
 
+/// https://webassembly.github.io/spec/
 pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, _) = magic(bytes)?;
     let (s, version) = version(s)?;
     let (s, mut customs) = many0(complete(custom_section))(s)?;
     let (s, types) = opt(type_section)(s)?;
-    let (s, customs2) = many0(complete(custom_section))(s)?;
+    let (s, custom2) = many0(complete(custom_section))(s)?;
     let (s, imports) = opt(import_section)(s)?;
-    let (s, customs3) = many0(complete(custom_section))(s)?;
+    let (s, custom3) = many0(complete(custom_section))(s)?;
     let (s, functions) = opt(function_section)(s)?;
-    let (s, customs4) = many0(complete(custom_section))(s)?;
+    let (s, custom4) = many0(complete(custom_section))(s)?;
     let (s, tables) = opt(table_section)(s)?;
-    let (s, customs5) = many0(complete(custom_section))(s)?;
+    let (s, custom5) = many0(complete(custom_section))(s)?;
     let (s, memories) = opt(memory_section)(s)?;
-    let (s, customs6) = many0(complete(custom_section))(s)?;
+    let (s, custom6) = many0(complete(custom_section))(s)?;
     let (s, globals) = opt(global_section)(s)?;
-    let (s, customs7) = many0(complete(custom_section))(s)?;
+    let (s, custom7) = many0(complete(custom_section))(s)?;
     let (s, exports) = opt(export_section)(s)?;
-    let (s, customs8) = many0(complete(custom_section))(s)?;
+    let (s, custom8) = many0(complete(custom_section))(s)?;
     let (s, start) = opt(start_section)(s)?;
-    let (s, customs9) = many0(complete(custom_section))(s)?;
+    let (s, custom9) = many0(complete(custom_section))(s)?;
     let (s, elements) = opt(element_section)(s)?;
-    let (s, customs10) = many0(complete(custom_section))(s)?;
+    let (s, custom10) = many0(complete(custom_section))(s)?;
     let (s, code) = opt(code_section)(s)?;
-    let (s, customs11) = many0(complete(custom_section))(s)?;
-    // TODO: data section
-    // TODO: custom section
+    let (s, custom11) = many0(complete(custom_section))(s)?;
+    // note that `data_section` has to be `complete`
+    // in order for `opt` to fail correctly on empty input
+    let (s, data) = opt(complete(data_section))(s)?;
+    let (s, custom12) = many0(complete(custom_section))(s)?;
 
-    customs.extend(customs2);
-    customs.extend(customs3);
-    customs.extend(customs4);
-    customs.extend(customs5);
-    customs.extend(customs6);
-    customs.extend(customs7);
-    customs.extend(customs8);
-    customs.extend(customs9);
-    customs.extend(customs10);
-    customs.extend(customs11);
+    customs.extend(custom2);
+    customs.extend(custom3);
+    customs.extend(custom4);
+    customs.extend(custom5);
+    customs.extend(custom6);
+    customs.extend(custom7);
+    customs.extend(custom8);
+    customs.extend(custom9);
+    customs.extend(custom10);
+    customs.extend(custom11);
+    customs.extend(custom12);
 
     Ok((
         s,
@@ -81,6 +86,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
             start,
             elements,
             code,
+            data,
             customs,
         },
     ))
@@ -99,6 +105,7 @@ pub struct WasmModule<'a> {
     start: Option<StartSection>,
     elements: Option<ElementSection>,
     code: Option<CodeSection>,
+    data: Option<DataSection>,
     customs: Vec<CustomSection<'a>>,
 }
 
@@ -293,6 +300,18 @@ pub struct Function {
 pub struct LocalDeclaration {
     entry_count: u32,
     value_type: ValType,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataSection {
+    data: Vec<Data>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Data {
+    memory_index: u32,
+    expression: Expression,
+    bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -565,6 +584,31 @@ fn local(s: &[u8]) -> IResult<&[u8], LocalDeclaration> {
         LocalDeclaration {
             entry_count,
             value_type,
+        },
+    ))
+}
+
+fn data_section(s: &[u8]) -> IResult<&[u8], DataSection> {
+    let (s, _section_id) = char(DATA_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128_u32(s)?;
+    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, data) = count(data, vec_length as usize)(s)?;
+
+    Ok((s, DataSection { data }))
+}
+
+fn data(s: &[u8]) -> IResult<&[u8], Data> {
+    let (s, (memory_index, _)) = leb_128_u32(s)?;
+    let (s, expression) = expression(s)?;
+    let (s, (byte_vec_length, _)) = leb_128_u32(s)?;
+    let (s, bytes) = count(le_u8, byte_vec_length as usize)(s)?;
+
+    Ok((
+        s,
+        Data {
+            memory_index,
+            expression,
+            bytes,
         },
     ))
 }
