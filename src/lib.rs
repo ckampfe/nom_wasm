@@ -33,25 +33,25 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, types) = opt(type_section)(s)?;
     let (s, customs2) = many0(complete(custom_section))(s)?;
     let (s, imports) = opt(import_section)(s)?;
-    // custom section
-    let (s, functions) = opt(function_section)(s)?;
     let (s, customs3) = many0(complete(custom_section))(s)?;
-    let (s, tables) = opt(table_section)(s)?;
+    let (s, functions) = opt(function_section)(s)?;
     let (s, customs4) = many0(complete(custom_section))(s)?;
-    let (s, memories) = opt(memory_section)(s)?;
+    let (s, tables) = opt(table_section)(s)?;
     let (s, customs5) = many0(complete(custom_section))(s)?;
-    // global section
-    // custom section
-    let (s, exports) = opt(export_section)(s)?;
+    let (s, memories) = opt(memory_section)(s)?;
     let (s, customs6) = many0(complete(custom_section))(s)?;
-    // start section
-    // custom section
-    // elem section
-    // custom section
-    let (s, code) = opt(code_section)(s)?;
+    // TODO: global section
+    // TODO: custom section
+    let (s, exports) = opt(export_section)(s)?;
     let (s, customs7) = many0(complete(custom_section))(s)?;
-    // data section
-    // custom section
+    // TODO: start section
+    // TODO: custom section
+    // TODO: elem section
+    // TODO: custom section
+    let (s, code) = opt(code_section)(s)?;
+    let (s, customs8) = many0(complete(custom_section))(s)?;
+    // TODO: data section
+    // TODO: custom section
 
     customs.extend(customs2);
     customs.extend(customs3);
@@ -59,6 +59,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     customs.extend(customs5);
     customs.extend(customs6);
     customs.extend(customs7);
+    customs.extend(customs8);
 
     Ok((
         s,
