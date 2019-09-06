@@ -696,9 +696,9 @@ fn leb_128_u32(s: &[u8]) -> IResult<&[u8], (u32, u32)> {
     loop {
         let (s, byte) = le_u8(s)?;
         bytes_consumed += 1;
-        let lowest_7 = byte & 0b0111_1111;
+        let lowest_7 = byte as u32 & 0b00000000_00000000_00000000_01111111 as u32;
         result |= lowest_7 << shift;
-        let highest = byte & 0b1000_0000;
+        let highest = byte as u32 & 0b10000000_00000000_00000000_00000000 as u32;
         if highest == 0 {
             return Ok((s, (result.into(), bytes_consumed)));
         } else {
