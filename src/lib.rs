@@ -8,27 +8,28 @@ use nom::multi::{count, many0};
 use nom::number::streaming::{le_u32, le_u8};
 use nom::sequence::pair;
 use nom::*;
+use std::convert::TryInto;
 
 type ParseResult<'a, T> =
     std::result::Result<(T, WasmModule<'a>), nom::Err<(T, nom::error::ErrorKind)>>;
 
-const CUSTOM_SECTION_ID: char = 0 as char;
-const TYPE_SECTION_ID: char = 1 as char;
-const IMPORT_SECTION_ID: char = 2 as char;
-const FUNCTION_SECTION_ID: char = 3 as char;
-const TABLE_SECTION_ID: char = 4 as char;
-const MEMORY_SECTION_ID: char = 5 as char;
-const GLOBAL_SECTION_ID: char = 6 as char;
-const EXPORT_SECTION_ID: char = 7 as char;
-const START_SECTION_ID: char = 8 as char;
-const ELEMENT_SECTION_ID: char = 9 as char;
-const CODE_SECTION_ID: char = 10 as char;
-const DATA_SECTION_ID: char = 11 as char;
+const CUSTOM_SECTION_ID: &[u8] = &[0];
+const TYPE_SECTION_ID: &[u8] = &[1];
+const IMPORT_SECTION_ID: &[u8] = &[2];
+const FUNCTION_SECTION_ID: &[u8] = &[3];
+const TABLE_SECTION_ID: &[u8] = &[4];
+const MEMORY_SECTION_ID: &[u8] = &[5];
+const GLOBAL_SECTION_ID: &[u8] = &[6];
+const EXPORT_SECTION_ID: &[u8] = &[7];
+const START_SECTION_ID: &[u8] = &[8];
+const ELEMENT_SECTION_ID: &[u8] = &[9];
+const CODE_SECTION_ID: &[u8] = &[10];
+const DATA_SECTION_ID: &[u8] = &[11];
 
-const FUNCTION_TYPE: char = 0x60 as char;
-const FUNC_REF_TYPE: char = 0x70 as char;
+const FUNCTION_TYPE: &[u8] = &[0x60];
+const FUNC_REF_TYPE: &[u8] = &[0x70];
 
-const END_OPCODE: char = 0x0B as char;
+const END_OPCODE: &[u8] = &[0x0B];
 
 /// https://webassembly.github.io/spec/
 pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
@@ -53,7 +54,7 @@ pub fn parse(bytes: &[u8]) -> ParseResult<&[u8]> {
     let (s, custom9) = many0(complete(custom_section))(s)?;
     let (s, elements) = opt(element_section)(s)?;
     let (s, custom10) = many0(complete(custom_section))(s)?;
-    let (s, code) = opt(code_section)(s)?;
+    let (s, code) = opt(complete(code_section))(s)?;
     let (s, custom11) = many0(complete(custom_section))(s)?;
     // note that `data_section` has to be `complete`
     // in order for `opt` to fail correctly on empty input
@@ -128,7 +129,7 @@ pub struct Import<'a> {
 
 #[derive(Clone, Debug)]
 pub struct FunctionSection {
-    functions: Vec<u32>,
+    functions: Vec<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,18 +151,18 @@ pub struct Table {
 
 #[derive(Clone, Debug)]
 pub struct Limits {
-    min: u32,
+    min: u64,
     max: Max,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Max {
-    Number(u32),
+    Number(u64),
     E,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum ValType {
+pub enum ValType {
     I32,
     I64,
     F32,
@@ -183,7 +184,7 @@ pub struct Memory {
 
 #[derive(Clone, Debug)]
 pub struct StartSection {
-    start: u32,
+    start: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -193,9 +194,9 @@ pub struct ElementSection {
 
 #[derive(Clone, Debug)]
 pub struct Element {
-    table_index: u32,
+    table_index: u64,
     offset: Expression,
-    init: Vec<u32>,
+    init: Vec<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -227,54 +228,54 @@ pub struct Export<'a> {
 }
 
 trait Description {
-    fn function_index(idx: u32) -> Self;
-    fn table_index(idx: u32) -> Self;
-    fn memory_index(idx: u32) -> Self;
-    fn global_index(idx: u32) -> Self;
+    fn function_index(idx: u64) -> Self;
+    fn table_index(idx: u64) -> Self;
+    fn memory_index(idx: u64) -> Self;
+    fn global_index(idx: u64) -> Self;
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportDesc {
-    FuncIdx(u32),
-    TableIdx(u32),
-    MemIdx(u32),
-    GlobalIdx(u32),
+    FuncIdx(u64),
+    TableIdx(u64),
+    MemIdx(u64),
+    GlobalIdx(u64),
 }
 
 impl Description for ExportDesc {
-    fn function_index(idx: u32) -> Self {
+    fn function_index(idx: u64) -> Self {
         Self::FuncIdx(idx)
     }
-    fn table_index(idx: u32) -> Self {
+    fn table_index(idx: u64) -> Self {
         Self::TableIdx(idx)
     }
-    fn memory_index(idx: u32) -> Self {
+    fn memory_index(idx: u64) -> Self {
         Self::MemIdx(idx)
     }
-    fn global_index(idx: u32) -> Self {
+    fn global_index(idx: u64) -> Self {
         Self::GlobalIdx(idx)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImportDesc {
-    FuncIdx(u32),
-    TableIdx(u32),
-    MemIdx(u32),
-    GlobalIdx(u32),
+    FuncIdx(u64),
+    TableIdx(u64),
+    MemIdx(u64),
+    GlobalIdx(u64),
 }
 
 impl Description for ImportDesc {
-    fn function_index(idx: u32) -> Self {
+    fn function_index(idx: u64) -> Self {
         Self::FuncIdx(idx)
     }
-    fn table_index(idx: u32) -> Self {
+    fn table_index(idx: u64) -> Self {
         Self::TableIdx(idx)
     }
-    fn memory_index(idx: u32) -> Self {
+    fn memory_index(idx: u64) -> Self {
         Self::MemIdx(idx)
     }
-    fn global_index(idx: u32) -> Self {
+    fn global_index(idx: u64) -> Self {
         Self::GlobalIdx(idx)
     }
 }
@@ -286,7 +287,7 @@ pub struct CodeSection {
 
 #[derive(Clone, Debug)]
 pub struct Code {
-    size: u32,
+    size: u64,
     function: Function,
 }
 
@@ -298,7 +299,7 @@ pub struct Function {
 
 #[derive(Clone, Debug)]
 pub struct LocalDeclaration {
-    entry_count: u32,
+    entry_count: u64,
     value_type: ValType,
 }
 
@@ -309,7 +310,7 @@ pub struct DataSection {
 
 #[derive(Clone, Debug)]
 pub struct Data {
-    memory_index: u32,
+    memory_index: u64,
     expression: Expression,
     bytes: Vec<u8>,
 }
@@ -321,9 +322,60 @@ pub struct Expression {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
+    // control instructions
+    Unreachable,
+    Nop,
+    Block(BlockType, Vec<Instruction>),
+    Loop(BlockType, Vec<Instruction>),
+    Br(u32),
+    BrIf(u32),
+    BrTable(Vec<u32>, Vec<u32>),
+    Return,
+    Call(u32),
+    CallIndirect(u32),
+
+    // parametric instructions
+    Drop,
+    Select,
+
+    // variable instructions
     LocalGet(u32),
+    LocalSet(u32),
+    LocalTee(u32),
+    GlobalGet(u32),
+    GlobalSet(u32),
+
+    // memory instructions
+    I32Load(u32, u32),
+    I64Load(u32, u32),
+    I32Load8u(u32, u32),
+    I32Load16u(u32, u32),
+    I32Store(u32, u32),
+    I64Store(u32, u32),
+    I32Store8(u32, u32),
+    I32Store16(u32, u32),
+
+    // numeric instructions
     I32Const(i32),
+    I64Const(i64),
+    I32Eqz,
+    I32Eq,
+    I32Ne,
+    I32Ltu,
+    I32Gtu,
+    I32Geu,
     I32Add,
+    I32Sub,
+    I32And,
+    I32Or,
+    I32Shl,
+    I32ShrU,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BlockType {
+    Empty,
+    ValType(ValType),
 }
 
 #[derive(Clone, Debug)]
@@ -354,19 +406,19 @@ fn version(s: &[u8]) -> IResult<&[u8], u32> {
 }
 
 fn type_section(s: &[u8]) -> IResult<&[u8], TypeSection> {
-    let (s, _section_id) = char(TYPE_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(TYPE_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, function_types) = count(function_type, vec_length as usize)(s)?;
     let type_section = TypeSection { function_types };
     Ok((s, type_section))
 }
 
 fn function_type(s: &[u8]) -> IResult<&[u8], FunctionType> {
-    let (s, _function_type_id) = char(FUNCTION_TYPE)(s)?;
-    let (s, (parameter_type_length, _)) = leb_128_u32(s)?;
+    let (s, _function_type_id) = tag(FUNCTION_TYPE)(s)?;
+    let (s, parameter_type_length) = leb_128(s)?;
     let (s, parameter_types) = count(map(le_u8, byte_to_type), parameter_type_length as usize)(s)?;
-    let (s, (result_type_length, _)) = leb_128_u32(s)?;
+    let (s, result_type_length) = leb_128(s)?;
     let (s, result_types) = count(map(le_u8, byte_to_type), result_type_length as usize)(s)?;
     Ok((
         s,
@@ -378,19 +430,18 @@ fn function_type(s: &[u8]) -> IResult<&[u8], FunctionType> {
 }
 
 fn import_section(s: &[u8]) -> IResult<&[u8], ImportSection> {
-    let (s, _section_id) = char(IMPORT_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(IMPORT_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, imports) = count(import, vec_length as usize)(s)?;
-
     Ok((s, ImportSection { imports }))
 }
 
 fn import(s: &[u8]) -> IResult<&[u8], Import> {
-    let (s, (module, _)) = name(s)?;
-    let (s, (name, _)) = name(s)?;
+    let (s, module) = name(s)?;
+    let (s, name) = name(s)?;
     let (s, desc_kind_byte) = le_u8(s)?;
-    let (s, (idx, _)) = leb_128_u32(s)?;
+    let (s, idx) = leb_128(s)?;
     let import_description = desc(desc_kind_byte, idx);
 
     Ok((
@@ -404,20 +455,12 @@ fn import(s: &[u8]) -> IResult<&[u8], Import> {
 }
 
 fn function_section(s: &[u8]) -> IResult<&[u8], FunctionSection> {
-    let (s, _section_id) = char(FUNCTION_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
-    let mut type_indices = vec![];
-    let mut s_and_index: (&[u8], (u32, u32)) = (s, (0, 0));
-
-    for _i in 0..vec_length {
-        s_and_index = leb_128_u32(s)?;
-        let (_, (this_index, _)) = s_and_index;
-        type_indices.push(this_index);
-    }
-
+    let (s, _section_id) = tag(FUNCTION_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
+    let (s, type_indices) = count(leb_128, vec_length as usize)(s)?;
     Ok((
-        s_and_index.0,
+        s,
         FunctionSection {
             functions: type_indices,
         },
@@ -425,9 +468,9 @@ fn function_section(s: &[u8]) -> IResult<&[u8], FunctionSection> {
 }
 
 fn table_section(s: &[u8]) -> IResult<&[u8], TableSection> {
-    let (s, _section_id) = char(TABLE_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(TABLE_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
 
     let (s, tables) = count(
         map(pair(func_ref, limits), |(_funcref, limits)| Table {
@@ -441,9 +484,9 @@ fn table_section(s: &[u8]) -> IResult<&[u8], TableSection> {
 }
 
 fn memory_section(s: &[u8]) -> IResult<&[u8], MemorySection> {
-    let (s, _section_id) = char(MEMORY_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(MEMORY_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
 
     let (s, memories) = count(map(limits, |limits| Memory { limits }), vec_length as usize)(s)?;
 
@@ -451,9 +494,9 @@ fn memory_section(s: &[u8]) -> IResult<&[u8], MemorySection> {
 }
 
 fn global_section(s: &[u8]) -> IResult<&[u8], GlobalSection> {
-    let (s, _section_id) = char(GLOBAL_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(GLOBAL_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, globals) = count(global, vec_length as usize)(s)?;
 
     Ok((s, GlobalSection { globals }))
@@ -498,59 +541,61 @@ fn boolean_byte(s: &[u8]) -> IResult<&[u8], bool> {
 }
 
 fn export_section(s: &[u8]) -> IResult<&[u8], ExportSection> {
-    let (s, _section_id) = char(EXPORT_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(EXPORT_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, exports) = count(export, vec_length as usize)(s)?;
 
     Ok((s, ExportSection { exports }))
 }
 
 fn export(s: &[u8]) -> IResult<&[u8], Export> {
-    let (s, (name, _)) = name(s)?;
+    let (s, name) = name(s)?;
     let (s, desc_kind_byte) = le_u8(s)?;
-    let (s, (idx, _)) = leb_128_u32(s)?;
+    let (s, idx) = leb_128(s)?;
     let desc = desc(desc_kind_byte, idx);
     Ok((s, Export { name, desc }))
 }
 
 fn start_section(s: &[u8]) -> IResult<&[u8], StartSection> {
-    let (s, _section_id) = char(START_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (idx, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(START_SECTION_ID)(s)?;
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, idx) = leb_128(s)?;
 
     Ok((s, StartSection { start: idx }))
 }
 
 fn element_section(s: &[u8]) -> IResult<&[u8], ElementSection> {
-    let (s, _section_id) = char(ELEMENT_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(ELEMENT_SECTION_ID)(s)?;
+    println!("got element section id");
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, elements) = count(element, vec_length as usize)(s)?;
 
     Ok((s, ElementSection { elements }))
 }
 
 fn element(s: &[u8]) -> IResult<&[u8], Element> {
-    let (s, (table_index, _)) = leb_128_u32(s)?;
+    let (s, table_index) = leb_128(s)?;
     let (s, offset) = expression(s)?;
-    let (s, (init_vec_length, _)) = leb_128_u32(s)?;
-    let (s, init) = count(leb_128_u32, init_vec_length as usize)(s)?;
+    let (s, init_vec_length) = leb_128(s)?;
+    let (s, init) = count(leb_128, init_vec_length as usize)(s)?;
 
     Ok((
         s,
         Element {
             table_index,
             offset,
-            init: init.into_iter().map(|t| t.0).collect(),
+            init,
         },
     ))
 }
 
 fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
-    let (s, _section_id) = char(CODE_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(CODE_SECTION_ID)(s)?;
+    println!("got code section id");
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
 
     let (s, codes) = count(code, vec_length as usize)(s)?;
 
@@ -558,7 +603,7 @@ fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
 }
 
 fn code(s: &[u8]) -> IResult<&[u8], Code> {
-    let (s, (size, _)) = leb_128_u32(s)?;
+    let (s, size) = leb_128(s)?;
     let (s, function) = function(s)?;
 
     Ok((s, Code { size, function }))
@@ -571,14 +616,15 @@ fn function(s: &[u8]) -> IResult<&[u8], Function> {
 }
 
 fn local_declarations(s: &[u8]) -> IResult<&[u8], Vec<LocalDeclaration>> {
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, locals) = count(local, vec_length as usize)(s)?;
     Ok((s, locals))
 }
 
 fn local(s: &[u8]) -> IResult<&[u8], LocalDeclaration> {
-    let (s, (entry_count, _)) = leb_128_u32(s)?;
+    let (s, entry_count) = leb_128(s)?;
     let (s, value_type) = map(le_u8, byte_to_type)(s)?;
+    println!("got value type {:?}", value_type);
     Ok((
         s,
         LocalDeclaration {
@@ -589,18 +635,19 @@ fn local(s: &[u8]) -> IResult<&[u8], LocalDeclaration> {
 }
 
 fn data_section(s: &[u8]) -> IResult<&[u8], DataSection> {
-    let (s, _section_id) = char(DATA_SECTION_ID)(s)?;
-    let (s, _section_length_bytes) = leb_128_u32(s)?;
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+    let (s, _section_id) = tag(DATA_SECTION_ID)(s)?;
+    println!("got data section id");
+    let (s, _section_length_bytes) = leb_128(s)?;
+    let (s, vec_length) = leb_128(s)?;
     let (s, data) = count(data, vec_length as usize)(s)?;
 
     Ok((s, DataSection { data }))
 }
 
 fn data(s: &[u8]) -> IResult<&[u8], Data> {
-    let (s, (memory_index, _)) = leb_128_u32(s)?;
+    let (s, memory_index) = leb_128(s)?;
     let (s, expression) = expression(s)?;
-    let (s, (byte_vec_length, _)) = leb_128_u32(s)?;
+    let (s, byte_vec_length) = leb_128(s)?;
     let (s, bytes) = count(le_u8, byte_vec_length as usize)(s)?;
 
     Ok((
@@ -615,36 +662,248 @@ fn data(s: &[u8]) -> IResult<&[u8], Data> {
 
 fn expression(s: &[u8]) -> IResult<&[u8], Expression> {
     let (s, instructions) = many0(instruction)(s)?;
-    let (s, _) = char(END_OPCODE)(s)?;
+    let (s, _) = tag(END_OPCODE)(s)?;
     Ok((s, Expression { instructions }))
 }
 
 fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
     let (s, instruction) = alt((
-        map(
-            pair(char(0x20.into()), leb_128_u32),
-            |(_bytecode, (idx, _))| Instruction::LocalGet(idx),
-        ),
-        map(pair(char(0x41.into()), leb_128_i32), |(_bytecode, n)| {
-            Instruction::I32Const(n)
-        }),
-        map(char(0x6A.into()), |_bytecode| Instruction::I32Add),
+        alt((
+            // control instructions
+            map(tag(&[0x00]), |_bytecode| Instruction::Unreachable),
+            map(tag(&[0x01]), |_bytecode| Instruction::Nop),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = char(0x02.into())(s)?;
+                    let (s, blocktype) = blocktype(s)?;
+                    let (s, instructions) = many0(instruction)(s)?;
+                    let (s, _) = tag(END_OPCODE)(s)?;
+
+                    Ok((s, Instruction::Block(blocktype, instructions)))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x03])(s)?;
+                    let (s, blocktype) = blocktype(s)?;
+                    let (s, instructions) = many0(instruction)(s)?;
+                    let (s, _) = tag(END_OPCODE)(s)?;
+
+                    Ok((s, Instruction::Loop(blocktype, instructions)))
+                },
+                |block| block,
+            ),
+            map(pair(tag(&[0x0C]), leb_128), |(_bytecode, idx)| {
+                Instruction::Br(idx.try_into().unwrap())
+            }),
+            map(pair(tag(&[0x0D]), leb_128), |(_bytecode, idx)| {
+                Instruction::BrIf(idx.try_into().unwrap())
+            }),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x0E])(s)?;
+                    let (s, vec_length) = leb_128(s)?;
+                    let (s, label_idxs1) =
+                        count(map(leb_128, |i| i.try_into().unwrap()), vec_length as usize)(s)?;
+                    let (s, label_idxs2) =
+                        count(map(leb_128, |i| i.try_into().unwrap()), vec_length as usize)(s)?;
+
+                    Ok((s, Instruction::BrTable(label_idxs1, label_idxs2)))
+                },
+                |block| block,
+            ),
+            map(tag(&[0x0F]), |_bytecode| Instruction::Return),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x10])(s)?;
+                    let (s, func_idx) = leb_128(s)?;
+
+                    Ok((s, Instruction::Call(func_idx.try_into().unwrap())))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x11])(s)?;
+                    let (s, type_idx) = leb_128(s)?;
+                    let (s, _) = tag(&[0x00])(s)?;
+
+                    Ok((s, Instruction::CallIndirect(type_idx.try_into().unwrap())))
+                },
+                |block| block,
+            ),
+            // parametric instructions
+            map(tag(&[0x1A]), |_bytecode| Instruction::Drop),
+            map(tag(&[0x1B]), |_bytecode| Instruction::Select),
+            // variable instructions
+            map(pair(tag(&[0x20]), leb_128), |(_bytecode, idx)| {
+                Instruction::LocalGet(idx.try_into().unwrap())
+            }),
+            map(pair(tag(&[0x21]), leb_128), |(_bytecode, idx)| {
+                Instruction::LocalSet(idx.try_into().unwrap())
+            }),
+            map(pair(tag(&[0x22]), leb_128), |(_bytecode, idx)| {
+                Instruction::LocalTee(idx.try_into().unwrap())
+            }),
+            map(pair(tag(&[0x23]), leb_128), |(_bytecode, idx)| {
+                Instruction::GlobalGet(idx.try_into().unwrap())
+            }),
+            map(pair(tag(&[0x24]), leb_128), |(_bytecode, idx)| {
+                Instruction::GlobalSet(idx.try_into().unwrap())
+            }),
+        )),
+        alt((
+            // memory instructions
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x28])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Load(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x29])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I64Load(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x2D])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Load8u(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x2F])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Load16u(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x36])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Store(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x37])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I64Store(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x3A])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Store8(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0x3B])(s)?;
+                    let (s, b1) = leb_128(s)?;
+                    let (s, b2) = leb_128(s)?;
+                    Ok((
+                        s,
+                        Instruction::I32Store16(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                    ))
+                },
+                |block| block,
+            ),
+        )),
+        alt((
+            // numeric instructions
+            map(pair(tag(&[0x41]), leb_128_i32), |(_bytecode, n)| {
+                Instruction::I32Const(n as i32)
+            }),
+            map(pair(tag(&[0x42]), leb_128_i32), |(_bytecode, n)| {
+                Instruction::I64Const(n)
+            }),
+            map(tag(&[0x45]), |_| Instruction::I32Eqz),
+            map(tag(&[0x46]), |_| Instruction::I32Eq),
+            map(tag(&[0x47]), |_| Instruction::I32Ne),
+            map(tag(&[0x49]), |_| Instruction::I32Ltu),
+            map(tag(&[0x4B]), |_| Instruction::I32Gtu),
+            map(tag(&[0x4F]), |_| Instruction::I32Geu),
+            map(tag(&[0x6A]), |_bytecode| Instruction::I32Add),
+            map(tag(&[0x6B]), |_bytecode| Instruction::I32Sub),
+            map(tag(&[0x71]), |_bytecode| Instruction::I32And),
+            map(tag(&[0x72]), |_bytecode| Instruction::I32Or),
+            map(tag(&[0x74]), |_bytecode| Instruction::I32Shl),
+            map(tag(&[0x76]), |_bytecode| Instruction::I32ShrU),
+        )),
     ))(s)?;
+
+    println!("got {:?}", instruction);
 
     Ok((s, instruction))
 }
 
+fn blocktype(s: &[u8]) -> IResult<&[u8], BlockType> {
+    let (s, blocktype) = alt((
+        map(char(0x40.into()), |_bytecode| BlockType::Empty),
+        map(map(le_u8, byte_to_type), |val_type| {
+            BlockType::ValType(val_type)
+        }),
+    ))(s)?;
+
+    Ok((s, blocktype))
+}
+
 fn custom_section(s: &[u8]) -> IResult<&[u8], CustomSection> {
-    let (s, _section_id) = char(CUSTOM_SECTION_ID)(s)?;
-    let (s, (section_length_bytes, consumed)) = leb_128_u32(s)?;
-    let (s, (name, name_bytes_taken)) = name(s)?;
-    let to_take = section_length_bytes - name_bytes_taken - consumed;
+    let (s, _section_id) = tag(CUSTOM_SECTION_ID)(s)?;
+    let (s, section_length_bytes) = leb_128(s)?;
+    let s1 = s.len();
+    let (s, name) = name(s)?;
+    let s2 = s.len();
+    let to_take = section_length_bytes - (s1 as u64 - s2 as u64);
     let (s, bytes) = take(to_take)(s)?;
 
     Ok((s, CustomSection { name, bytes }))
 }
 
-fn desc<T: Description>(desc_kind_byte: u8, idx: u32) -> T {
+fn desc<T: Description>(desc_kind_byte: u8, idx: u64) -> T {
     match desc_kind_byte {
         0x00 => T::function_index(idx),
         0x01 => T::table_index(idx),
@@ -654,27 +913,25 @@ fn desc<T: Description>(desc_kind_byte: u8, idx: u32) -> T {
     }
 }
 
-fn name(s: &[u8]) -> IResult<&[u8], (&str, u32)> {
-    let (s, (vec_length, _)) = leb_128_u32(s)?;
+fn name(s: &[u8]) -> IResult<&[u8], &str> {
+    let (s, vec_length) = leb_128(s)?;
     let (s, name) = take(vec_length)(s)?;
     let name = std::str::from_utf8(name).unwrap();
 
-    let total_taken = vec_length;
-
-    Ok((s, (name, total_taken)))
+    Ok((s, name))
 }
 
 fn limits(s: &[u8]) -> IResult<&[u8], Limits> {
     let (s, kind_byte) = le_u8(s)?;
     match kind_byte {
         0x00 => {
-            let (s, (min, _)) = leb_128_u32(s)?;
+            let (s, min) = leb_128(s)?;
             let max = Max::E;
             Ok((s, Limits { min, max }))
         }
         0x01 => {
-            let (s, (min, _)) = leb_128_u32(s)?;
-            let (s, (max, _)) = leb_128_u32(s)?;
+            let (s, min) = leb_128(s)?;
+            let (s, max) = leb_128(s)?;
             let max = Max::Number(max);
             Ok((s, Limits { min, max }))
         }
@@ -683,55 +940,84 @@ fn limits(s: &[u8]) -> IResult<&[u8], Limits> {
 }
 
 fn func_ref(s: &[u8]) -> IResult<&[u8], ()> {
-    let (s, _) = char(FUNC_REF_TYPE)(s)?;
+    let (s, _) = tag(FUNC_REF_TYPE)(s)?;
     Ok((s, ()))
 }
 
+pub const CONTINUATION_BIT: u8 = 1 << 7;
+
 /// https://en.wikipedia.org/wiki/LEB128 and
 /// https://stackoverflow.com/questions/43230917/extract-7-bits-signed-integer-from-u8-byte
-fn leb_128_u32(s: &[u8]) -> IResult<&[u8], (u32, u32)> {
-    let mut bytes_consumed = 0;
-    let mut result = 0;
+fn leb_128(s: &[u8]) -> IResult<&[u8], u64> {
+    let mut result = 0u64;
     let mut shift = 0;
-    loop {
-        let (s, byte) = le_u8(s)?;
-        bytes_consumed += 1;
-        let lowest_7 = byte as u32 & 0b00000000_00000000_00000000_01111111 as u32;
-        result |= lowest_7 << shift;
-        let highest = byte as u32 & 0b10000000_00000000_00000000_00000000 as u32;
+
+    let buf: &mut [u8] = &mut [0];
+    let mut ss: &[u8] = s;
+
+    let (s, result) = loop {
+        let (this_s, this_byte) = take(1usize)(ss)?;
+        ss = this_s;
+        buf[0] = this_byte[0];
+
+        /*
+        !CONTINUATION_BIT
+         */
+        // let lowest_7_bits = (byte[0] & 0b0111_1111u8) as u32;
+        let lowest_7_bits = u64::from(buf[0] & 0b0111_1111);
+        result |= lowest_7_bits << shift;
+
+        let highest = buf[0] & 0b1000_0000;
+        // if byte[0] & CONTINUATION_BIT == 0 {
         if highest == 0 {
-            return Ok((s, (result.into(), bytes_consumed)));
-        } else {
-            shift += 7;
+            // return Ok((s, result));
+            break (ss, result);
         }
-    }
+
+        shift += 7;
+    };
+
+    Ok((s, result))
 }
 
+const SIGN_BIT: u8 = 1 << 6;
+
 /// https://en.wikipedia.org/wiki/LEB128 and
 /// https://stackoverflow.com/questions/43230917/extract-7-bits-signed-integer-from-u8-byte
-fn leb_128_i32(s: &[u8]) -> IResult<&[u8], i32> {
+fn leb_128_i32(s: &[u8]) -> IResult<&[u8], i64> {
     let mut result = 0;
     let mut shift = 0;
-    let size = 32;
+    let size = 64;
+    let buf: &mut [u8] = &mut [0];
+    let mut ss: &[u8] = s;
 
-    let (s, mut result, byte) = loop {
-        let (s, byte) = le_u8(s)?;
-        let lowest_7 = byte & 0b0111_1111;
-        result |= lowest_7 << shift;
+    let (s, mut result, buf) = loop {
+        // let (s, byte) = le_u8(s)?;
+        let (this_s, this_byte) = take(1usize)(ss)?;
+        ss = this_s;
+        buf[0] = this_byte[0];
+
+        if shift == 63 && buf[0] != 0x00 && buf[0] != 0x7f {
+            panic!("Overflow");
+        }
+
+        // let lowest_7 = byte & 0b0111_1111;
+        let lowest_7_bits = i64::from(buf[0] & 0b0111_1111u8);
+        result |= lowest_7_bits << shift;
         shift += 7;
 
-        let highest = byte & 0b1000_0000;
+        // let highest = byte[0] & 0b1000_0000;
+        let highest = buf[0] & 0b1000_0000;
         if highest == 0 {
-            break (s, result, byte);
+            break (ss, result, buf);
         }
     };
 
-    let sign_bit = byte & 0b0100_0000;
-    if shift < size && sign_bit == 1 {
+    if shift < size && (SIGN_BIT & buf[0]) == SIGN_BIT {
         result |= !0 << shift;
     }
 
-    Ok((s, result.into()))
+    Ok((s, result))
 }
 
 #[cfg(test)]
@@ -753,8 +1039,8 @@ mod tests {
 
         let (remaining, wasm) = parse(&buffer).unwrap();
 
-        println!("{:#?}", wasm);
-        println!("remaining: {:#?}", remaining);
+        // println!("{:#?}", wasm);
+        // println!("remaining: {:#?}", remaining);
 
         // version
         assert_eq!(wasm.version, 1);
@@ -798,6 +1084,7 @@ mod tests {
             code.codes[0].function.expression.instructions[1],
             Instruction::I32Const(1)
         );
+
         assert_eq!(
             code.codes[0].function.expression.instructions[2],
             Instruction::I32Add
@@ -809,6 +1096,39 @@ mod tests {
         assert_eq!(wasm.customs[0].bytes.len(), 3);
         assert_eq!(wasm.customs[1].name, "name");
         assert_eq!(wasm.customs[1].bytes.len(), 12);
+
+        // remaining
+        assert!(remaining.is_empty())
+    }
+
+    #[test]
+    fn one_million() {
+        let mut f = File::open("fixtures/1_000_000.wasm").unwrap();
+
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer).unwrap();
+
+        let (remaining, wasm) = parse(&buffer).unwrap();
+
+        assert_eq!(wasm.version, 1);
+    }
+
+    #[test]
+    fn it_does_a_module_with_imports() {
+        let mut f = File::open("fixtures/wasm_import_test.wasm").unwrap();
+
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer).unwrap();
+
+        let (remaining, wasm) = parse(&buffer).unwrap();
+
+        assert_eq!(wasm.version, 1);
+
+        // types section
+        let types = &wasm.types.unwrap();
+        assert_eq!(types.function_types[1].parameter_types.len(), 1);
+        assert_eq!(types.function_types[1].parameter_types[0], ValType::I32);
+        assert_eq!(types.function_types[1].result_types.len(), 0);
 
         // remaining
         assert!(remaining.is_empty())
