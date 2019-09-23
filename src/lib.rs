@@ -354,6 +354,7 @@ pub enum Instruction {
     I64Store(u32, u32),
     I32Store8(u32, u32),
     I32Store16(u32, u32),
+    MemoryGrow,
 
     // numeric instructions
     I32Const(i32),
@@ -362,14 +363,40 @@ pub enum Instruction {
     I32Eq,
     I32Ne,
     I32Ltu,
+    I32Gts,
+    I32Lts,
     I32Gtu,
+    I32Les,
+    I32Leu,
     I32Geu,
+    I32Clz,
+    I32Ctz,
     I32Add,
     I32Sub,
     I32And,
     I32Or,
+    I32Xor,
     I32Shl,
     I32ShrU,
+    I32RotL,
+    I64Eq,
+    I64Add,
+    I64DivS,
+    I64Shl,
+    I64ShrU,
+    F32Max,
+    I32WrapI64,
+    I64ExtendI32u,
+
+    // weird/wrong instructions?
+    DwarfOpWasmLocation(DwarfLocation, u32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DwarfLocation {
+    WasmLocal,
+    WasmGlobal,
+    WasmOperandStack,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -593,10 +620,8 @@ fn element(s: &[u8]) -> IResult<&[u8], Element> {
 
 fn code_section(s: &[u8]) -> IResult<&[u8], CodeSection> {
     let (s, _section_id) = tag(CODE_SECTION_ID)(s)?;
-    println!("got code section id");
     let (s, _section_length_bytes) = leb_128(s)?;
     let (s, vec_length) = leb_128(s)?;
-
     let (s, codes) = count(code, vec_length as usize)(s)?;
 
     Ok((s, CodeSection { codes }))
@@ -611,6 +636,7 @@ fn code(s: &[u8]) -> IResult<&[u8], Code> {
 
 fn function(s: &[u8]) -> IResult<&[u8], Function> {
     let (s, locals) = local_declarations(s)?;
+    println!("locals {:?}", locals);
     let (s, expression) = expression(s)?;
     Ok((s, Function { locals, expression }))
 }
@@ -624,7 +650,6 @@ fn local_declarations(s: &[u8]) -> IResult<&[u8], Vec<LocalDeclaration>> {
 fn local(s: &[u8]) -> IResult<&[u8], LocalDeclaration> {
     let (s, entry_count) = leb_128(s)?;
     let (s, value_type) = map(le_u8, byte_to_type)(s)?;
-    println!("got value type {:?}", value_type);
     Ok((
         s,
         LocalDeclaration {
@@ -667,6 +692,8 @@ fn expression(s: &[u8]) -> IResult<&[u8], Expression> {
 }
 
 fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
+    let (ss, byte) = take(15usize)(s)?;
+    println!("{:#?}", byte);
     let (s, instruction) = alt((
         alt((
             // control instructions
@@ -674,7 +701,7 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(tag(&[0x01]), |_bytecode| Instruction::Nop),
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
-                    let (s, _) = char(0x02.into())(s)?;
+                    let (s, _) = tag(&[0x02])(s)?;
                     let (s, blocktype) = blocktype(s)?;
                     let (s, instructions) = many0(instruction)(s)?;
                     let (s, _) = tag(END_OPCODE)(s)?;
@@ -758,11 +785,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x28])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Load(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Load(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -770,11 +800,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x29])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I64Load(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I64Load(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -782,11 +815,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x2D])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Load8u(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Load8u(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -794,11 +830,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x2F])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Load16u(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Load16u(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -806,11 +845,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x36])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Store(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Store(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -818,11 +860,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x37])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I64Store(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I64Store(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -830,11 +875,14 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x3A])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Store8(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Store8(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
@@ -842,15 +890,21 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(
                 |s: &[u8]| -> IResult<&[u8], Instruction> {
                     let (s, _) = tag(&[0x3B])(s)?;
-                    let (s, b1) = leb_128(s)?;
-                    let (s, b2) = leb_128(s)?;
+                    let (s, alignment) = leb_128(s)?;
+                    let (s, offset) = leb_128(s)?;
                     Ok((
                         s,
-                        Instruction::I32Store16(b1.try_into().unwrap(), b2.try_into().unwrap()),
+                        Instruction::I32Store16(
+                            2u32.pow(alignment.try_into().unwrap()),
+                            offset.try_into().unwrap(),
+                        ),
                     ))
                 },
                 |block| block,
             ),
+            map(pair(tag(&[0x40]), tag(&[0x00])), |(_bytecode, n)| {
+                Instruction::MemoryGrow
+            }),
         )),
         alt((
             // numeric instructions
@@ -863,15 +917,55 @@ fn instruction(s: &[u8]) -> IResult<&[u8], Instruction> {
             map(tag(&[0x45]), |_| Instruction::I32Eqz),
             map(tag(&[0x46]), |_| Instruction::I32Eq),
             map(tag(&[0x47]), |_| Instruction::I32Ne),
+            map(tag(&[0x48]), |_| Instruction::I32Lts),
             map(tag(&[0x49]), |_| Instruction::I32Ltu),
+            map(tag(&[0x4A]), |_| Instruction::I32Gts),
             map(tag(&[0x4B]), |_| Instruction::I32Gtu),
+            map(tag(&[0x4C]), |_| Instruction::I32Les),
+            map(tag(&[0x4D]), |_| Instruction::I32Leu),
             map(tag(&[0x4F]), |_| Instruction::I32Geu),
+            map(tag(&[0x51]), |_| Instruction::I64Eq),
+            map(tag(&[0x67]), |_bytecode| Instruction::I32Clz),
+            map(tag(&[0x68]), |_bytecode| Instruction::I32Ctz),
             map(tag(&[0x6A]), |_bytecode| Instruction::I32Add),
             map(tag(&[0x6B]), |_bytecode| Instruction::I32Sub),
+        )),
+        alt((
             map(tag(&[0x71]), |_bytecode| Instruction::I32And),
             map(tag(&[0x72]), |_bytecode| Instruction::I32Or),
+            map(tag(&[0x73]), |_bytecode| Instruction::I32Xor),
             map(tag(&[0x74]), |_bytecode| Instruction::I32Shl),
             map(tag(&[0x76]), |_bytecode| Instruction::I32ShrU),
+            map(tag(&[0x77]), |_bytecode| Instruction::I32RotL),
+            map(tag(&[0x7C]), |_bytecode| Instruction::I64Add),
+            map(tag(&[0x7F]), |_bytecode| Instruction::I64DivS),
+            map(tag(&[0x86]), |_bytecode| Instruction::I64Shl),
+            map(tag(&[0x88]), |_bytecode| Instruction::I64ShrU),
+            map(tag(&[0x97]), |_bytecode| Instruction::F32Max),
+            map(tag(&[0xA7]), |_bytecode| Instruction::I32WrapI64),
+            map(tag(&[0xAD]), |_bytecode| Instruction::I64ExtendI32u),
+            // TODO:  debug instructions? maybe? what is this?
+            // https://yurydelendik.github.io/webassembly-dwarf/#dwarf-locals
+            map(
+                |s: &[u8]| -> IResult<&[u8], Instruction> {
+                    let (s, _) = tag(&[0xEB])(s)?;
+                    let (s, location_type_byte) = le_u8(s)?;
+                    let (s, location_index) = leb_128(s)?;
+
+                    let location = match location_type_byte {
+                        0x00 => DwarfLocation::WasmLocal,
+                        0x01 => DwarfLocation::WasmGlobal,
+                        0x02 => DwarfLocation::WasmOperandStack,
+                        _ => panic!("dwarf location must be 0x00, 0x01, or 0x02"),
+                    };
+
+                    Ok((
+                        s,
+                        Instruction::DwarfOpWasmLocation(location, location_index as u32),
+                    ))
+                },
+                |block| block,
+            ),
         )),
     ))(s)?;
 
@@ -1108,7 +1202,7 @@ mod tests {
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).unwrap();
 
-        let (remaining, wasm) = parse(&buffer).unwrap();
+        let (_remaining, wasm) = parse(&buffer).unwrap();
 
         assert_eq!(wasm.version, 1);
     }
@@ -1122,6 +1216,10 @@ mod tests {
 
         let (remaining, wasm) = parse(&buffer).unwrap();
 
+        println!(
+            "{:?}",
+            remaining.into_iter().take(50).cloned().collect::<Vec<u8>>()
+        );
         assert_eq!(wasm.version, 1);
 
         // types section
